@@ -21,10 +21,10 @@ var Version = "dev"
 
 // Exit codes used across commands.
 const (
-	ExitOK        = 0
-	ExitError     = 1
-	ExitSyntax    = config.ExitCodeSyntax // 2 – bad config file
-	ExitLocked    = 6                     // 5/6 – another instance holds the lock
+	ExitOK     = 0
+	ExitError  = 1
+	ExitSyntax = config.ExitCodeSyntax // 2 – bad config file
+	ExitLocked = 6                     // 5/6 – another instance holds the lock
 )
 
 type rootOpts struct {
@@ -78,6 +78,7 @@ func NewRootCmd() *cobra.Command {
 		newCleanupCmd(),
 		newRunCmd(),
 		newScheduleCmd(),
+		newBridgeCmd(),
 	)
 	return root
 }

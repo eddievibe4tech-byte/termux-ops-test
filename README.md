@@ -101,6 +101,8 @@ hlops backup --task <n>  執行特定備份任務
 hlops cleanup            清理快取與舊備份
 hlops run <job>          以鎖檔執行排程任務
 hlops schedule generate  產生排程設定（cron）
+hlops bridge status      輸出機器可讀狀態 JSON（Companion APK 用）
+hlops bridge logs        輸出最新日誌尾端 JSON（Companion APK 用）
 hlops version            顯示版本與平台資訊
 ```
 
@@ -325,6 +327,21 @@ hlops cleanup --yes --dangerous
 hlops run backup
 hlops run cleanup
 ```
+
+---
+
+## `hlops bridge`
+
+提供未來 **Companion APK**（議題 #37/#38）消费的穩定機器可讀 JSON，
+完整契約見 [docs/companion-app-bridge.md](docs/companion-app-bridge.md)。
+
+```bash
+hlops bridge status              # 最新工作報表的正規化狀態（schema v1）
+hlops bridge status --job backup # 限定工作種類
+hlops bridge logs --lines 20     # 主日誌最後 20 行
+```
+
+特色：唯讀、無副作用；尚無報表時回傳 `"status": "no_report"` 的合法 JSON 而非錯誤。
 
 ---
 
