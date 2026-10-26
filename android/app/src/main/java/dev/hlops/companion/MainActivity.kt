@@ -62,10 +62,10 @@ fun HlopsScreen() {
     // SAF picker: users grant read access to ~/.local/state/hlops/reports and
     // .../logs once; persistable URIs survive reboots. This replaces the
     // rejected MANAGE_EXTERNAL_STORAGE route (Google Play policy, issue #37).
-    val openStatus = rememberLauncher(context) { uri ->
+    val openStatus = rememberLauncher { uri ->
         scope.launch { statusText = readBridgeStatus(context, uri) }
     }
-    val openLog = rememberLauncher(context) { uri ->
+    val openLog = rememberLauncher { uri ->
         scope.launch { logText = readLogFile(context, uri) }
     }
 
@@ -148,8 +148,10 @@ fun HlopsScreen() {
     }
 }
 
+// Must be @Composable: it wraps rememberLauncherForActivityResult, which is a
+// @Composable function (Kotlin requires the caller to be composable as well).
+@Composable
 private fun rememberLauncher(
-    context: Context,
     onResult: (Uri) -> Unit
 ) = androidx.activity.compose.rememberLauncherForActivityResult(
     ActivityResultContracts.OpenDocument()
