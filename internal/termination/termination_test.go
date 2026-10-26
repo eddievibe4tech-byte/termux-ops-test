@@ -7,16 +7,25 @@ import (
 )
 
 func TestClassifyExitInterrupted(t *testing.T) {
-	LastSignal = "terminated"
-	defer func() { LastSignal = ""; Interrupted = false }()
-
+	// Signal name is derived from the exit code (no globals involved). Go's
+	// syscall.Signal.String() returns lowercase names ("terminated",
+	// "interrupt"); what matters is they come from the code, not stale state.
 	got := ClassifyExit(ExitSignalBase+int(syscall.SIGTERM), true, false)
-	if !strings.Contains(got, "forcibly terminated") || !strings.Contains(got, "OEM battery settings") {
+	if !strings.Contains(got, "forcibly terminated") || !strings.Contains(got, "terminated") ||
+		!strings.Contains(got, "OEM battery settings") {
 		t.Errorf("generic interrupted msg = %q", got)
+	}
+	gotInt := ClassifyExit(ExitSignalBase+int(syscall.SIGINT), true, false)
+	if !strings.Contains(gotInt, "interrupt") {
+		t.Errorf("SIGINT interrupted msg = %q, want signal name derived from code", gotInt)
 	}
 	gotAgg := ClassifyExit(ExitSignalBase+int(syscall.SIGTERM), true, true)
 	if !strings.Contains(gotAgg, "aggressive OEM power manager detected") {
 		t.Errorf("aggressive interrupted msg = %q", gotAgg)
+	}
+	// Guard: an out-of-range code must not panic and should say "unknown".
+	if got := ClassifyExit(1, true, false); !strings.Contains(got, "exit 1") {
+		t.Errorf("weird interrupted code msg = %q", got)
 	}
 }
 

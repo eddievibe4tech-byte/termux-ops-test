@@ -31,37 +31,43 @@ import (
 // Companion APK can distinguish signal termination from plain errors (1).
 const ExitSignalBase = 128
 
-// Interrupted reports whether the process received a termination signal.
-// Set by WatchSignals; read by diagnostics in cli.Execute.
-var Interrupted = false
-
-// LastSignal holds the name of the termination signal received, if any.
-var LastSignal string
-
 // WatchSignals installs SIGINT/SIGTERM handlers. On receipt it logs a
-// structured warning naming the signal and hinting at OEM task killers, then
-// exits the process with 128+signum after best-effort cleanup via onClose.
+// structured warning naming the signal together with a full ClassifyExit
+// diagnosis — printed *before* os.Exit, because os.Exit terminates the whole
+// process immediately and no caller-side logging would ever run. It then
+// exits with 128+signum after best-effort cleanup via onClose.
+//
+// getOEMAgg is called from the signal goroutine to fetch the current OEM
+// aggressiveness flag; pass nil when the caller has no OEM context. There are
+// deliberately no package-level "Interrupted"/"LastSignal" globals: writing
+// them from this goroutine while other code reads them would be a data race,
+// and since os.Exit fires here anyway, nothing downstream could observe them.
 // Call once at process start (main). onClose may be nil.
-func WatchSignals(onClose func()) {
+func WatchSignals(onClose func(), getOEMAgg func() bool) {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		s := <-ch
-		Interrupted = true
 		sig, ok := s.(syscall.Signal)
 		if !ok {
 			sig = syscall.SIGTERM
 		}
-		LastSignal = s.String()
+		code := ExitSignalBase + int(sig)
+		var oemAgg bool
+		if getOEMAgg != nil {
+			oemAgg = getOEMAgg()
+		}
 		slog.Warn("hlops received termination signal",
 			"signal", s.String(),
+			"exit_code", code,
+			"diagnosis", ClassifyExit(code, true, oemAgg),
 			"hint", "if this was not you, an aggressive OEM battery manager "+
 				"(ColorOS/MIUI/OriginOS) likely killed Termux despite the wake lock; "+
 				"run 'hlops doctor' for the survival checklist")
 		if onClose != nil {
 			onClose()
 		}
-		os.Exit(ExitSignalBase + int(sig))
+		os.Exit(code)
 	}()
 }
 
@@ -71,14 +77,22 @@ func WatchSignals(onClose func()) {
 func ClassifyExit(code int, interrupted bool, oemAggressive bool) string {
 	switch {
 	case interrupted:
-		msg := fmt.Sprintf("process was forcibly terminated (signal %s, exit %d)", LastSignal, code)
+		// Derive the signal name from the exit code itself (143-128=15 →
+		// SIGTERM) instead of relying on global state written by the signal
+		// goroutine — that would be a data race and, post-os.Exit, unreadable.
+		sigName := "unknown"
+		if code > ExitSignalBase {
+			sigName = syscall.Signal(code - ExitSignalBase).String()
+		}
+		msg := fmt.Sprintf("process was forcibly terminated (signal %s, exit %d)", sigName, code)
 		if oemAggressive {
 			return msg + ": known aggressive OEM power manager detected — see 'hlops doctor' checklist (dontkillmyapp.com)"
 		}
 		return msg + ": if unexpected, check OEM battery settings (see docs/termux-quickstart.md)"
 	case code == ExitSignalBase+int(syscall.SIGKILL):
-		// SIGKILL cannot be caught, so WatchSignals never fires; still worth
-		// surfacing the interpretation when the *parent* reports it.
+		// Note: SIGKILL (137) cannot be caught by this process — WatchSignals
+		// never fires for it, so this classification is intended for external
+		// wrappers or the Companion APK parsing the exit code after the fact.
 		msg := "process was SIGKILLed (exit 137) — uncatchable; typical of low-memory kill (LMK) or OEM task killer"
 		if oemAggressive {
 			return msg + "; OEM ROM detected, follow 'hlops doctor' survival checklist"

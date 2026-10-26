@@ -48,10 +48,12 @@ func newRunCmd() *cobra.Command {
 				if err := emitBridgeStatus(cmd, job); err != nil {
 					return failBridge(cmd, job, true, err)
 				}
-			} else if asJSON {
+			} else if asJSON && !dryRun {
 				// Non-bridge --json consumers still benefit from the issue #43
 				// fault-tolerance hint: when the report is missing (killed mid
 				// run / never started), log why instead of staying silent.
+				// Skipped for --dry-run: no report file is written by design,
+				// so its absence is expected, not a termination symptom.
 				if _, err := bridge.LatestReport(job); err != nil {
 					oemAgg := termux.Detect().IsTermux && termux.DetectOEM().Aggressive
 					slog.Warn("missing completion report", "job", job,

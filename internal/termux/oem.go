@@ -138,7 +138,11 @@ func ParseGetprop(dump string) map[string]string {
 		}
 		key := line[1:closeKey]
 		val := strings.TrimSpace(line[closeKey+2:])
-		val = strings.Trim(val, "[]")
+		// Strip only a single pair of outer brackets; values may legitimately
+		// contain brackets themselves (e.g. display IDs like "[HyperOS]_V1").
+		if strings.HasPrefix(val, "[") && strings.HasSuffix(val, "]") && len(val) >= 2 {
+			val = val[1 : len(val)-1]
+		}
 		props[key] = val
 	}
 	return props
@@ -175,7 +179,7 @@ func classifyOEM(props map[string]string) *OEMInfo {
 		info.Manufacturer == "vivo", info.Manufacturer == "iqoo":
 		info.Family = OEMOriginOS
 	case has("ro.build.version.emui"), has("ro.huawei.build.display.id"),
-		strings.Contains(strings.ToLower(props["ro.build.hw_emui_api_level"]), "."),
+		has("ro.build.hw_emui_api_level"), // EMUI API levels are often plain integers ("9", "11")
 		info.Manufacturer == "huawei", info.Manufacturer == "honor":
 		info.Family = OEMEMUI
 	case info.Manufacturer == "meizu", containsFold(info.DisplayID, "flyme"):

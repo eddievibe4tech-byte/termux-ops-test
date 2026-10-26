@@ -100,8 +100,13 @@ func Execute() int {
 	// Issue #43: on aggressive OEM ROMs the system task killer sends
 	// SIGTERM/SIGKILL to Termux despite wake locks. WatchSignals turns a
 	// catchable termination into a logged, diagnosable exit (128+signum)
-	// instead of a silent death that looks like "the backup crashed".
-	termination.WatchSignals(closeAll)
+	// instead of a silent death that looks like "the backup crashed". The
+	// diagnosis is printed inside the signal goroutine before os.Exit —
+	// nothing after this function would ever run on that path.
+	oemAggressive := func() bool {
+		return termux.Detect().IsTermux && termux.DetectOEM().Aggressive
+	}
+	termination.WatchSignals(closeAll, oemAggressive)
 	cmd := NewRootCmd()
 	if err := cmd.Execute(); err != nil {
 		var ee *exitErr
@@ -114,9 +119,10 @@ func Execute() int {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		// One-line diagnosis so users (and log scrapers) can tell a real
 		// crash apart from a forced system termination or a benign skip.
-		oemAgg := termux.Detect().IsTermux && termux.DetectOEM().Aggressive
+		// interrupted=false here: signal deaths exit inside WatchSignals
+		// and never reach this branch.
 		slog.Warn("run terminated", "exit_code", code,
-			"diagnosis", termination.ClassifyExit(code, termination.Interrupted, oemAgg))
+			"diagnosis", termination.ClassifyExit(code, false, oemAggressive()))
 		return code
 	}
 	return ExitOK
