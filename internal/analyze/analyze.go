@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"syscall"
 	"time"
 )
 
@@ -161,16 +160,3 @@ func Scan(ctx context.Context, root string, opt Options) (*Result, error) {
 	return res, nil
 }
 
-func statfs(path string) Volume {
-	v := Volume{Path: path}
-	var st syscall.Statfs_t
-	if err := syscall.Statfs(path, &st); err != nil {
-		v.Error = err.Error()
-		return v
-	}
-	bsize := uint64(st.Bsize)
-	v.TotalBytes = st.Blocks * bsize
-	v.FreeBytes = st.Bfree * bsize
-	v.Available = st.Bavail * bsize
-	return v
-}

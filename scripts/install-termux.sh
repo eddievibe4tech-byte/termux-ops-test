@@ -20,7 +20,7 @@ echo "提醒：請先執行 'termux-setup-storage' 以取得共享儲存權限�
 
 TAG="$VERSION"
 if [ "$VERSION" = "latest" ]; then
-  TAG=$(curl -sSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | head -1 | cut -d'"' -f4)
+  TAG=$(curl -sSL "https://api.github.com/repos/$REPO/releases/latest" | grep -m 1 '"tag_name":' | cut -d'"' -f4)
 fi
 if [ -z "$TAG" ]; then
   echo "ERROR: no release found. Building from source instead." >&2

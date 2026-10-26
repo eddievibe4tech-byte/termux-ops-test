@@ -61,7 +61,7 @@ func GenerateCron(o CronOptions) (string, error) {
 
 	var body string
 	if wrap {
-		body = fmt.Sprintf("termux-wake-lock; %s run %s >> %s 2>&1; rc=$?; termux-wake-unlock; exit $rc",
+		body = fmt.Sprintf("termux-wake-lock || true; %s run %s >> %s 2>&1; rc=$?; termux-wake-unlock || true; exit $rc",
 			bin, o.Job, logFile)
 	} else {
 		body = fmt.Sprintf("%s run %s >> %s 2>&1", bin, o.Job, logFile)

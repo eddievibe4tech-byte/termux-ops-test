@@ -18,7 +18,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/eddievibe4tech-byte/termux-ops/internal/config"
@@ -289,7 +288,7 @@ func (r *Runner) createArchive(t config.Task, source, dest string, now time.Time
 	var mf *os.File
 	if needManifest {
 		manifestPath = filepath.Join(dest, strings.TrimSuffix(name, ".tar.gz")+".manifest.json")
-		mf, err = os.Create(manifestPath + ".part")
+		mf, err = os.OpenFile(manifestPath+".part", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 		if err != nil {
 			return "", "", "", err
 		}
@@ -311,9 +310,15 @@ func (r *Runner) createArchive(t config.Task, source, dest string, now time.Time
 		return "", "", "", err
 	}
 	if needManifest {
+		// Restrictive perms: the manifest records the user's file tree and
+		// ownership metadata, so keep it owner-only. On sdcard-like volumes
+		// modes are ignored anyway; that limitation is inherent to the
+		// destination filesystem.
 		if err := os.Rename(manifestPath+".part", manifestPath); err != nil {
 			slog.Warn("manifest rename failed", "err", err)
 			manifestPath = ""
+		} else if err := os.Chmod(manifestPath, 0o600); err != nil {
+			slog.Debug("manifest chmod skipped (volume may not support modes)", "err", err)
 		}
 	} else {
 		manifestPath = ""
@@ -447,10 +452,7 @@ func writeTarGzWithManifest(part, root string, files []string, wantManifest bool
 		}
 		src.Close()
 		if wantManifest {
-			uid, gid := -1, -1
-			if st, ok := fi.Sys().(*syscall.Stat_t); ok {
-					uid, gid = int(st.Uid), int(st.Gid)
-			}
+			uid, gid := fileOwner(fi)
 			manifest = append(manifest, mEntry{Path: rel, Mode: uint32(fi.Mode().Perm()), UID: uid, GID: gid, Size: fi.Size()})
 		}
 	}

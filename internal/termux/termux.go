@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // constTermuxPrefix is the well-known Termux private data prefix. It is used
@@ -22,7 +23,10 @@ type Info struct {
 	SharedStorage string // ~/storage/shared if available
 }
 
-var cached *Info
+var (
+	cached     *Info
+	detectOnce sync.Once
+)
 
 // Detect inspects the environment and returns a memoised Termux info.
 // Detection rules:
@@ -30,45 +34,50 @@ var cached *Info
 //   - PREFIX equals the well-known Termux prefix => Termux.
 //   - HOME under /data/data/com.termux/files/... => Termux.
 //
-// Plain Linux must not be misdetected.
+// Plain Linux must not be misdetected. The result is computed exactly once
+// via sync.Once so concurrent callers (future goroutine-based scanning)
+// cannot race on the memoised value.
 func Detect() *Info {
-	if cached != nil {
-		return cached
-	}
-	home := os.Getenv("HOME")
-	prefix := os.Getenv("PREFIX")
-	version := os.Getenv("TERMUX_VERSION")
+	detectOnce.Do(func() {
+		home := os.Getenv("HOME")
+		prefix := os.Getenv("PREFIX")
+		version := os.Getenv("TERMUX_VERSION")
 
-	isTermux := version != "" ||
-		filepath.Clean(prefix) == constTermuxPrefix ||
-		strings.HasPrefix(home, "/data/data/com.termux/files/")
+		isTermux := version != "" ||
+			filepath.Clean(prefix) == constTermuxPrefix ||
+			strings.HasPrefix(home, "/data/data/com.termux/files/")
 
-	if isTermux && prefix == "" {
-		prefix = constTermuxPrefix
-	}
-	if !isTermux {
-		version = ""
-	}
+		if isTermux && prefix == "" {
+			prefix = constTermuxPrefix
+		}
+		if !isTermux {
+			version = ""
+		}
 
-	tmpdir := os.Getenv("TMPDIR")
-	if tmpdir == "" && isTermux {
-		tmpdir = filepath.Join(prefix, "tmp")
-	}
+		tmpdir := os.Getenv("TMPDIR")
+		if tmpdir == "" && isTermux {
+			tmpdir = filepath.Join(prefix, "tmp")
+		}
 
-	i := &Info{
-		IsTermux:      isTermux,
-		Version:       version,
-		Prefix:        prefix,
-		Home:          home,
-		TmpDir:        tmpdir,
-		SharedStorage: sharedStoragePath(home),
-	}
-	cached = i
-	return i
+		i := &Info{
+			IsTermux:      isTermux,
+			Version:       version,
+			Prefix:        prefix,
+			Home:          home,
+			TmpDir:        tmpdir,
+			SharedStorage: sharedStoragePath(home),
+		}
+		cached = i
+	})
+	return cached
 }
 
 // ResetCache clears the memoised detection result (used by tests).
-func ResetCache() { cached = nil }
+// It re-arms the sync.Once so the next Detect() re-reads the environment.
+func ResetCache() {
+	cached = nil
+	detectOnce = sync.Once{}
+}
 
 func sharedStoragePath(home string) string {
 	if home == "" {

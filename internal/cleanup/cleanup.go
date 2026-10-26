@@ -4,13 +4,11 @@
 package cleanup
 
 import (
-	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/eddievibe4tech-byte/termux-ops/internal/config"
@@ -390,14 +388,19 @@ func ProbeProviders() []Probe {
 	return out
 }
 
-// EBUSY detection helper (kept for clarity/tests).
+// isBusy reports whether err looks like a "resource busy / in use" or
+// permission problem, in which case cleanup skips the entry instead of
+// failing. Implemented via error strings so it works without importing
+// syscall (keeps the package cross-platform buildable).
 func isBusy(err error) bool {
-	return errorsIs(err, syscall.EBUSY) || errorsIs(err, syscall.EACCES) || errorsIs(err, syscall.EPERM)
-}
-
-func errorsIs(err error, target syscall.Errno) bool {
 	if err == nil {
 		return false
 	}
-	return strings.Contains(fmt.Sprint(err), target.Error())
+	msg := err.Error()
+	for _, s := range []string{"device or resource busy", "permission denied", "operation not permitted"} {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+	return false
 }
