@@ -1,0 +1,39 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - run: go vet ./...
+      - run: go build ./...
+      - run: go test ./...
+
+  cross-compile:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goos: linux, goarch: arm64 }
+          - { goos: linux, goarch: amd64 }
+    env:
+      GOOS: ${{ matrix.goos }}
+      GOARCH: ${{ matrix.goarch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: Cross-compile (GOOS=$GOOS GOARCH=$GOARCH)
+        run: CGO_ENABLED=0 go build -o hlops-${GOOS}-${GOARCH} ./cmd/hlops
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hlops-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: hlops-${{ matrix.goos }}-${{ matrix.goarch }}
