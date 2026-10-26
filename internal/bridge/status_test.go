@@ -5,11 +5,14 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/eddievibe4tech-byte/termux-ops/internal/paths"
 )
 
-// writeReport drops a report JSON file into the state reports dir.
+// writeReport drops a report JSON file into the state reports dir. Every test
+// that uses it must first isolate HOME (t.TempDir + t.Setenv): the tests share
+// one package binary and would otherwise observe each other's seeded files.
 func writeReport(t *testing.T, name, body string) string {
 	t.Helper()
 	dir := paths.ReportDir()
@@ -88,6 +91,7 @@ func TestParseCleanupStatusAndUnknownFields(t *testing.T) {
 }
 
 func TestLatestReportPrefersNewest(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // isolate reports dir from sibling tests
 	old := writeReport(t, "backup-20200101-000000.json", sampleBackup)
 	newer := writeReport(t, "backup-20240101-000000.json", sampleBackup)
 	info, err := LatestReport(JobBackup)
@@ -143,10 +147,15 @@ func TestEmptyReportAggregatesToOK(t *testing.T) {
 	}
 }
 
-// Review regression #2: report ordering must rely on ModTime only, so file
-// names whose task part contains dashes (or any future stamp format) still
-// sort correctly newest-first.
-func TestListReportsSortsByModTimeWithDashedNames(t *testing.T) {
+// Review regression #2 (amended, CI fix): the primary ordering key is the
+// fixed-width run stamp parsed from the *tail* of the file name, so task names
+// containing dashes still sort correctly and copy/restore of the reports dir
+// (which flattens every ModTime to "now") keeps the true run order. The test
+// intentionally writes the newer-stamped file first: with pure-ModTime
+// ordering this passed only on coarse-granularity filesystems via the path
+// tie-break and failed deterministically on nanosecond-granularity ext4 in CI.
+func TestListReportsSortsByStampWithDashedNames(t *testing.T) {
+	t.Setenv("HOME", t.TempDir()) // isolate reports dir from sibling tests
 	newer := writeReport(t, "backup-website-blog-20240102-000000.json", sampleBackup)
 	writeReport(t, "backup-website-blog-20240101-000000.json", sampleBackup)
 	info, err := LatestReport(JobBackup)
@@ -155,6 +164,28 @@ func TestListReportsSortsByModTimeWithDashedNames(t *testing.T) {
 	}
 	if info.Path != newer {
 		t.Fatalf("got %q, want newest %q", info.Path, newer)
+	}
+}
+
+// Names without a parseable stamp must still order newest-first by ModTime.
+func TestListReportsFallsBackToModTime(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp) // isolate: earlier tests seeded the reports dir
+	a := writeReport(t, "backup-legacy-a.json", sampleBackup)
+	b := writeReport(t, "backup-legacy-b.json", sampleBackup)
+	now := time.Now()
+	if err := os.Chtimes(a, now.Add(-2*time.Hour), now.Add(-2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(b, now.Add(-time.Hour), now.Add(-time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	info, err := LatestReport(JobBackup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Path != b {
+		t.Fatalf("got %q, want %q", info.Path, b)
 	}
 }
 

@@ -115,15 +115,41 @@ type ReportInfo struct {
 	Path    string
 	Job     string
 	ModTime time.Time
+	// Stamp is the run timestamp embedded in the file name
+	// (…-YYYYMMDD-HHMMSS.json); zero when absent/unparsable.
+	Stamp time.Time
+}
+
+// reportStampLayout is the fixed-width run stamp suffix the CLI writes:
+// <job>[-<task>]-YYYYMMDD-HHMMSS.json (see backup.WriteReport).
+const reportStampLayout = "20060102-150405"
+
+// parseStamp extracts the run stamp from the *tail* of the file name, so task
+// names containing dashes ("backup-website-blog-20240102-000000.json") parse
+// correctly. Returns the zero time when the suffix is missing/invalid.
+func parseStamp(name string) time.Time {
+	base := strings.TrimSuffix(name, ".json")
+	if len(base) <= len(reportStampLayout) {
+		return time.Time{}
+	}
+	start := len(base) - len(reportStampLayout)
+	if base[start-1] != '-' { // stamp must be its own dash-separated segment
+		return time.Time{}
+	}
+	ts, err := time.ParseInLocation(reportStampLayout, base[start:], time.UTC)
+	if err != nil {
+		return time.Time{}
+	}
+	return ts
 }
 
 // ListReports returns every known report file under the state report dir,
-// sorted newest-first by modification time. Ordering deliberately relies on
-// the filesystem ModTime instead of parsing the timestamp out of the file
-// name: name-based parsing breaks as soon as task names contain dashes or the
-// stamp format evolves, while ModTime is always available and matches how
-// reports are actually written (one fresh file per run). Files whose prefix
-// is unrecognised are ignored.
+// sorted newest-first. The primary key is the fixed-width run stamp parsed
+// from the *tail* of the file name: it records the true run time and survives
+// copy/restore of the reports directory (where every ModTime collapses to the
+// moment of copying). Parsing from the tail keeps dashed task names safe, and
+// filesystem ModTime remains the fallback for names without a parsable stamp.
+// Files whose prefix is unrecognised are ignored.
 func ListReports() ([]ReportInfo, error) {
 	dir := paths.ReportDir()
 	ents, err := os.ReadDir(dir)
@@ -155,13 +181,25 @@ func ListReports() ([]ReportInfo, error) {
 			Path:    filepath.Join(dir, e.Name()),
 			Job:     job,
 			ModTime: info.ModTime(),
+			Stamp:   parseStamp(e.Name()),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		a, b := out[i], out[j]
+		// 1) Name stamp wins: it is the true run time and survives
+		//    copy/restore (ModTime does not).
+		if !a.Stamp.IsZero() && !b.Stamp.IsZero() && !a.Stamp.Equal(b.Stamp) {
+			return a.Stamp.After(b.Stamp)
+		}
+		// 2) A parseable stamp beats an unparsable name.
+		if a.Stamp.IsZero() != b.Stamp.IsZero() {
+			return !a.Stamp.IsZero()
+		}
+		// 3) Fallback: filesystem ModTime (regression #2).
 		if !a.ModTime.Equal(b.ModTime) {
 			return a.ModTime.After(b.ModTime)
 		}
+		// 4) Deterministic tie-break.
 		return a.Path > b.Path
 	})
 	return out, nil

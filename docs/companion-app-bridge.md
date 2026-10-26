@@ -87,9 +87,12 @@ hlops bridge logs    ◀──tail────────────┘  $HOME
 | `error` | string | 僅在硬失敗且未寫出任何報表時出現（頂層錯誤訊息） |
 | `hlops_version` | string | 產生報表的 CLI 版本 |
 
-排序說明：「最新報表」一律以檔案系統 `ModTime` 判定，不从檔名解析時間戳記，
-因此任務名稱含 dash（如 `backup-website-blog-...json`）或未來檔名格式變更
-都不影響正確性。空任務清單的已存在報表聚合為 `ok`；`no_report` 僅代表
+排序說明：「最新報表」以檔名尾端的固定寬度時間戳記（`YYYYMMDD-HHMMSS`，
+即 CLI 寫入報表時使用的格式 `backup-20260101-020000.json`）為主要排序鍵——
+它代表真實執行時間，且報表目錄被複製/還原到新裝置後依然正確（ModTime 會全部
+變成複製當下）。解析取自檔名**尾端**，因此任務名稱含 dash（如
+`backup-website-blog-20240102-000000.json`）不受影響；無法從檔名解析出時間戳
+時退回檔案系統 `ModTime`。空任務清單的已存在報表聚合為 `ok`；`no_report` 僅代表
 「找不到任何報表檔」。
 
 ### 聚合 `status` 值
