@@ -1,0 +1,72 @@
+name: Android CI
+# Companion APK pipeline (issue #39): build debug/release APKs on every PR
+# touching android/, plus the Go-side bridge-contract guard so the Kotlin
+# parser can never silently drift from `hlops bridge` JSON output.
+on:
+  pull_request:
+    paths:
+      - 'android/**'
+      - 'internal/bridge/**'            # Go-side bridge changes must re-trigger the contract guard
+      - 'docs/companion-app-bridge.md'  # doc changes also trigger, keeping schema in sync
+      - '.github/workflows/android-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - 'internal/bridge/**'
+      - 'docs/companion-app-bridge.md'
+      - '.github/workflows/android-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  bridge-contract:
+    # Runs even when only Go code changes — cheap and catches drift early.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify bridge JSON contract (Go ↔ Kotlin)
+        run: bash android/verify-bridge-contract.sh
+
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          cache-read-only: ${{ secrets.KEYSTORE_BASE64 == '' }}
+      - name: Assemble debug APK
+        run: ./gradlew --no-daemon assembleDebug
+      - name: Assemble release APK
+        # Release signing is opt-in via secrets (issue #39). Without them the
+        # build falls back to the debug signing config (see app/build.gradle.kts),
+        # so fork PRs never fail on missing keys.
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/hlops.keystore"
+            export KEYPATH="$RUNNER_TEMP/hlops.keystore"
+          fi
+          ./gradlew --no-daemon assembleRelease
+      - name: Lint (report only; abortOnError disabled in build.gradle.kts)
+        run: ./gradlew --no-daemon lintDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: companion-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: companion-release-apk
+          path: android/app/build/outputs/apk/release/*.apk
