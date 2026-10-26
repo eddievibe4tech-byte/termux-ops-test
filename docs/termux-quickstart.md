@@ -69,6 +69,8 @@ Android 系統（特別是 **ColorOS、HyperOS/MIUI、OriginOS** 等客製化 RO
 
 另外可在 Termux 中執行 `termux-wake-lock`（hlops run 會自動處理）。
 
+**自動偵測**：在 Termux 中執行 `hlops doctor`，hlops 會透過 `getprop` 辨識裝置是否屬於 ColorOS / HyperOS-MIUI / OriginOS / EMUI / Flyme 等激進省電 ROM，並直接輸出對應品牌的防殺 checklist，無需逐項比對手冊。若排程備份「沒有留下任何報告」，`hlops run --json` 與異常退出診斷也會提示最可能原因（被系統终止 vs. 真正 crash）。
+
 > 更多不同品牌手機的設定指引，請參考 [Don't kill my app!](https://dontkillmyapp.com/)。
 
 ## 日誌

@@ -213,7 +213,7 @@ enabled = true
 - `~/storage/shared` 是否可寫
 - 內部儲存與共享儲存剩餘空間
 - `crond` 是否安裝並執行
-- **電池優化與 OEM 系統背景存活提醒（如 ColorOS / MIUI）**
+- **電池優化與 OEM 系統背景存活提醒（如 ColorOS / MIUI / OriginOS / EMUI）**：透過 `getprop` 自動識別裝置所屬 OEM ROM 家族，若偵測到激進省電機制會輸出該品牌的「背景防殺 checklist」（白名單、自啟動、多工鎖定等）
 - 設定檔是否合法
 
 範例：
@@ -222,6 +222,14 @@ enabled = true
 hlops doctor
 hlops doctor --json
 ```
+
+### 異常終止診斷（issue #43）
+
+在 ColorOS / HyperOS-MIUI 等客製 ROM 上，系統 task killer 可能忽略 WakeLock 強制終止 Termux，讓排程備份「看起來像當機」。hlops 現已內建三層防護：
+
+1. **訊號監聽**：收到 SIGTERM/SIGINT 時記錄明確警告（提示可能是 OEM 殺後台），並以慣例的 `128+signum` 退出碼結束，方便 cron / Companion APK 判讀。
+2. **退出碼分類**：任務失敗時輸出一行診斷（區分真正 crash、被系統terminated、鎖跳過等情境）。
+3. **報告缺失診斷**：`hlops run <job> --json` 若找不到完成報告，會依環境（是否偵測到激進 OEM ROM）給出最可能原因與修正指引。
 
 ---
 

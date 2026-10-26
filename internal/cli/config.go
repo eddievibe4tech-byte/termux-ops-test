@@ -82,14 +82,38 @@ func newDoctorCmd() *cobra.Command {
 			}
 			// On Termux, add an advisory about aggressive OEM battery managers
 			// (ColorOS / HyperOS-MIUI / OriginOS) that may freeze or kill
-			// background jobs despite wake locks. This check is informational
-			// and never affects the overall health result.
+			// background jobs despite wake locks. When getprop identifies a
+			// known aggressive ROM we surface the device family plus a
+			// concrete survival checklist; otherwise a generic advisory is
+			// shown. This check is informational and never affects the
+			// overall health result (issue #43).
 			if info.IsTermux {
-				checks = append(checks, map[string]any{
-					"name":   "oem_battery_advisory",
-					"ok":     true,
-					"detail": "On aggressive OEM ROMs (ColorOS / HyperOS-MIUI / OriginOS), manually allow unrestricted background behaviour, lock Termux in Recents, enable auto-start, and disable sleep standby optimisation. See https://dontkillmyapp.com/",
-				})
+				oem := termux.DetectOEM()
+				if oem.Aggressive {
+					checks = append(checks, map[string]any{
+						"name":   "oem_battery_advisory",
+						"ok":     true,
+						"detail": fmt.Sprintf("aggressive OEM ROM detected (%s, manufacturer=%s): background jobs may be killed despite termux-wake-lock. Apply this checklist before relying on schedules:", oem.Family, orDash(oem.Manufacturer)),
+					})
+					for _, item := range oem.Checklist() {
+						checks = append(checks, map[string]any{
+							"name":   "oem_checklist_item",
+							"ok":     true,
+							"detail": item,
+						})
+					}
+					checks = append(checks, map[string]any{
+						"name":   "oem_reference",
+						"ok":     true,
+						"detail": "https://dontkillmyapp.com/ — brand-specific guides; full SOP in docs/termux-quickstart.md",
+					})
+				} else {
+					checks = append(checks, map[string]any{
+						"name":   "oem_battery_advisory",
+						"ok":     true,
+						"detail": "No aggressive OEM ROM detected via getprop. On ColorOS / HyperOS-MIUI / OriginOS devices still verify manually: allow unrestricted background behaviour, lock Termux in Recents, enable auto-start, disable sleep standby optimisation. See https://dontkillmyapp.com/",
+					})
+				}
 			}
 			allOK := true
 			for _, c := range checks {

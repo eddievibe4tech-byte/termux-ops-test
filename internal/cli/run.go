@@ -2,11 +2,14 @@ package cli
 
 import (
 	"fmt"
+	"log/slog"
 
 	"github.com/spf13/cobra"
 
 	"github.com/eddievibe4tech-byte/termux-ops/internal/bridge"
 	"github.com/eddievibe4tech-byte/termux-ops/internal/sched"
+	"github.com/eddievibe4tech-byte/termux-ops/internal/termination"
+	"github.com/eddievibe4tech-byte/termux-ops/internal/termux"
 )
 
 // newRunCmd implements `hlops run backup|cleanup` — the scheduled entrypoint.
@@ -44,6 +47,17 @@ func newRunCmd() *cobra.Command {
 			if asJSON && bridgeJSON {
 				if err := emitBridgeStatus(cmd, job); err != nil {
 					return failBridge(cmd, job, true, err)
+				}
+			} else if asJSON && !dryRun {
+				// Non-bridge --json consumers still benefit from the issue #43
+				// fault-tolerance hint: when the report is missing (killed mid
+				// run / never started), log why instead of staying silent.
+				// Skipped for --dry-run: no report file is written by design,
+				// so its absence is expected, not a termination symptom.
+				if _, err := bridge.LatestReport(job); err != nil {
+					oemAgg := termux.Detect().IsTermux && termux.DetectOEM().Aggressive
+					slog.Warn("missing completion report", "job", job,
+						"diagnosis", termination.DiagnoseMissingReport(job, oemAgg))
 				}
 			}
 			return nil
