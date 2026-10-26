@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -77,25 +78,51 @@ func newBridgeLogsCmd() *cobra.Command {
 				return encodeJSON(cmd.OutOrStdout(), out) // empty but valid
 			}
 			out.File = f
-			data, err := os.ReadFile(f)
+			lines, truncated, err := tailLines(f, lines)
 			if err != nil {
 				return err
 			}
-			all := strings.Split(strings.TrimRight(string(data), "\n"), "\n")
-			if len(all) == 1 && all[0] == "" {
-				// Empty file: keep the "array, never null" JSON invariant.
-				all = []string{}
-			}
-			if len(all) > lines {
-				out.Truncated = true
-				all = all[len(all)-lines:]
-			}
-			out.Lines = all
+			out.Lines = lines
+			out.Truncated = truncated
 			return encodeJSON(cmd.OutOrStdout(), out)
 		},
 	}
 	cmd.Flags().IntVar(&lines, "lines", 200, "maximum number of trailing lines to return")
 	return cmd
+}
+
+// tailLines streams path and returns at most maxLines trailing lines. It
+// keeps a sliding window in memory instead of reading the whole file, so RAM
+// usage stays O(maxLines * avg line length) even for month-old multi-hundred
+// MB logs on Termux (an os.ReadFile here would risk OOM-killing the app).
+func tailLines(path string, maxLines int) (lines []string, truncated bool, err error) {
+	lines = []string{} // "array, never null" JSON invariant
+	if maxLines <= 0 {
+		return lines, false, nil
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, false, err
+	}
+	defer f.Close()
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+		if len(lines) > maxLines {
+			copy(lines, lines[1:])
+			lines = lines[:len(lines)-1]
+			truncated = true
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, false, err
+	}
+	// Trim trailing blank lines (mirrors the old strings.TrimRight "\n"
+	// behaviour so an empty/blank log yields [] rather than [""]).
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines, truncated, nil
 }
 
 // newestFile returns the most recently modified regular file in dir whose

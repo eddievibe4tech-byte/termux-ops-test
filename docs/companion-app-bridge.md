@@ -31,6 +31,17 @@ hlops bridge logs    ◀──tail────────────┘  $HOME
 ### `hlops bridge logs [--lines N]`
 
 回傳主日誌檔最後 N 行（預設 50），以 JSON 字串陣列呈現，方便 APK 直接渲染。
+實作上以串流方式（`bufio.Scanner` + 滑動視窗）讀取，記憶體佔用恆定為
+`O(N × 平均行長)`，即使日誌累積數十 MB 也不會造成 Termux OOM。
+
+### `hlops run <job> --json --bridge`
+
+執行工作並以**單一 BridgeStatus JSON 文件**輸出結果（契約與
+`hlops bridge status` 完全相同）。若工作在寫出報表前就硬失敗
+（lock 衝突、設定錯誤等），stdout 仍會輸出一份
+`status: "failed"` 且帶 `error` 欄位的合法文件；APK **必須同時**
+檢查非零 exit code——非零代表嚴重錯誤，不得改讀舊報表當成好結果。
+（注意：`hlops backup --json` 維持輸出 raw report 格式，不受影響。）
 
 ## BridgeStatus JSON Schema（v1）
 
@@ -72,8 +83,14 @@ hlops bridge logs    ◀──tail────────────┘  $HOME
 | `started` / `finished` | string | 工作起訖時間（來自原始報表） |
 | `dry_run` | bool | 是否為预览執行 |
 | `success` / `failed` / `skipped` | int | 各任務計數 |
-| `tasks[]` | array | 正規化的逐項結果 |
+| `tasks[]` | array | 正規化的逐項結果（保證為陣列，絕不為 null） |
+| `error` | string | 僅在硬失敗且未寫出任何報表時出現（頂層錯誤訊息） |
 | `hlops_version` | string | 產生報表的 CLI 版本 |
+
+排序說明：「最新報表」一律以檔案系統 `ModTime` 判定，不从檔名解析時間戳記，
+因此任務名稱含 dash（如 `backup-website-blog-...json`）或未來檔名格式變更
+都不影響正確性。空任務清單的已存在報表聚合為 `ok`；`no_report` 僅代表
+「找不到任何報表檔」。
 
 ### 聚合 `status` 值
 

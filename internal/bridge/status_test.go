@@ -128,3 +128,46 @@ func TestDryRunCountsAsPartial(t *testing.T) {
 		t.Fatalf("dry-run should map to partial, got %s", bs.Status)
 	}
 }
+
+// Review regression #3: an existing report with zero tasks (user ran a job
+// while no tasks are enabled) is a real, successful run — it must map to
+// "ok", never "no_report", so the APK does not wrongly show onboarding.
+func TestEmptyReportAggregatesToOK(t *testing.T) {
+	body := `{"started":"s","finished":"f","dry_run":false,"success":0,"failed":0,"skipped":0,"results":[]}`
+	bs, err := ParseStatus([]byte(body), "empty.json", JobBackup, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bs.Status != StatusOK {
+		t.Fatalf("empty report should be ok, got %s", bs.Status)
+	}
+}
+
+// Review regression #2: report ordering must rely on ModTime only, so file
+// names whose task part contains dashes (or any future stamp format) still
+// sort correctly newest-first.
+func TestListReportsSortsByModTimeWithDashedNames(t *testing.T) {
+	newer := writeReport(t, "backup-website-blog-20240102-000000.json", sampleBackup)
+	writeReport(t, "backup-website-blog-20240101-000000.json", sampleBackup)
+	info, err := LatestReport(JobBackup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Path != newer {
+		t.Fatalf("got %q, want newest %q", info.Path, newer)
+	}
+}
+
+// Review regression #4: hard failures synthesise a parseable failed doc.
+func TestNewFailedStatusShape(t *testing.T) {
+	fs := NewFailedStatus(JobBackup, "test", "another run holds the lock")
+	if fs.Status != StatusFailed || fs.Error == "" || fs.Schema != SchemaVersion {
+		t.Fatalf("bad failed status: %+v", fs)
+	}
+	if fs.Tasks == nil {
+		t.Fatal("tasks must be an array, never null")
+	}
+	if fs.Job != JobBackup {
+		t.Fatalf("job = %q", fs.Job)
+	}
+}

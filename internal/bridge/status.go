@@ -73,6 +73,7 @@ type BridgeStatus struct {
 	Failed       int         `json:"failed"`
 	Skipped      int         `json:"skipped"`
 	Tasks        []TaskState `json:"tasks"`
+	Error        string      `json:"error,omitempty"` // set when status=failed before any report was written
 	HlopsVersion string      `json:"hlops_version,omitempty"`
 }
 
@@ -114,30 +115,15 @@ type ReportInfo struct {
 	Path    string
 	Job     string
 	ModTime time.Time
-	// Stamp is the UTC timestamp embedded in the file name
-	// (YYYYMMDD-HHMMSS); zero when absent/unparsable.
-	Stamp time.Time
-}
-
-var reportNameLayout = "20060102-150405"
-
-// parseStamp extracts the timestamp from a report file name like
-// backup-20261026-030000.json.
-func parseStamp(name string) time.Time {
-	base := strings.TrimSuffix(name, ".json")
-	i := strings.IndexByte(base, '-')
-	if i < 0 || len(base)-i-1 < len(reportNameLayout) {
-		return time.Time{}
-	}
-	ts, err := time.ParseInLocation(reportNameLayout, base[i+1:], time.UTC)
-	if err != nil {
-		return time.Time{}
-	}
-	return ts
 }
 
 // ListReports returns every known report file under the state report dir,
-// sorted newest-first. Files whose prefix is unrecognised are ignored.
+// sorted newest-first by modification time. Ordering deliberately relies on
+// the filesystem ModTime instead of parsing the timestamp out of the file
+// name: name-based parsing breaks as soon as task names contain dashes or the
+// stamp format evolves, while ModTime is always available and matches how
+// reports are actually written (one fresh file per run). Files whose prefix
+// is unrecognised are ignored.
 func ListReports() ([]ReportInfo, error) {
 	dir := paths.ReportDir()
 	ents, err := os.ReadDir(dir)
@@ -169,20 +155,32 @@ func ListReports() ([]ReportInfo, error) {
 			Path:    filepath.Join(dir, e.Name()),
 			Job:     job,
 			ModTime: info.ModTime(),
-			Stamp:   parseStamp(e.Name()),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
 		a, b := out[i], out[j]
-		if !a.Stamp.Equal(b.Stamp) {
-			return a.Stamp.After(b.Stamp)
-		}
 		if !a.ModTime.Equal(b.ModTime) {
 			return a.ModTime.After(b.ModTime)
 		}
 		return a.Path > b.Path
 	})
 	return out, nil
+}
+
+// NewFailedStatus builds the bridge document emitted when a run failed so
+// hard that no report was written at all (lock contention, invalid config,
+// ...). The Companion APK can then always parse stdout as one BridgeStatus
+// instead of special-casing "non-zero exit + empty stdout".
+func NewFailedStatus(job, version, errMsg string) *BridgeStatus {
+	return &BridgeStatus{
+		Schema:       SchemaVersion,
+		GeneratedAt:  time.Now().UTC().Format(time.RFC3339),
+		Job:          job,
+		Status:       StatusFailed,
+		Tasks:        []TaskState{},
+		Error:        errMsg,
+		HlopsVersion: version,
+	}
 }
 
 // LatestReport returns the newest report for the given job ("" = any job).
@@ -272,12 +270,15 @@ func ParseStatus(data []byte, srcPath, job, version string) (*BridgeStatus, erro
 	return bs, nil
 }
 
+// aggregate derives the outcome of an *existing* report. It must never
+// return StatusNoReport: that state is reserved for NoReport(), which the
+// CLI builds only when no report file exists at all. A successful run with
+// zero enabled tasks is a real (empty) report and maps to ok, so the APK
+// shows "done" instead of wrongly falling back to the onboarding screen.
 func aggregate(bs *BridgeStatus) string {
 	switch {
 	case bs.Failed > 0:
 		return StatusFailed
-	case bs.Success == 0 && bs.Skipped == 0 && len(bs.Tasks) == 0:
-		return StatusNoReport
 	case bs.Skipped > 0 || bs.DryRun:
 		return StatusPartial
 	default:

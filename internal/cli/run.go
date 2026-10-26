@@ -12,41 +12,47 @@ import (
 // newRunCmd implements `hlops run backup|cleanup` — the scheduled entrypoint.
 // It behaves like the standalone commands but is what cron jobs (and the
 // Companion APK via the Termux RUN_COMMAND intent, issue #38) should call:
-// it always takes the lock + wake-lock guards, and with --json it prints the
-// normalized bridge status document instead of human output so callers can
-// parse the result without reading report files themselves.
+// it always takes the lock + wake-lock guards, and with --json --bridge it
+// prints exactly one normalized BridgeStatus document for every outcome —
+// including hard failures that never wrote a report — so the App can parse
+// stdout without reading report files or special-casing empty output.
 func newRunCmd() *cobra.Command {
 	var (
-		dryRun bool
-		asJSON bool
-		task   string
+		dryRun     bool
+		asJSON     bool
+		bridgeJSON bool
+		task       string
 	)
 	run := &cobra.Command{
 		Use:   "run <backup|cleanup>",
 		Short: "Run a job as intended for schedulers and the Companion APK (lock + wake-lock guarded)",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			switch args[0] {
+			job := args[0]
+			switch job {
 			case "backup":
 				if err := runBackup(cmd, dryRun, task, asJSON); err != nil {
-					return err
+					return failBridge(cmd, job, asJSON && bridgeJSON, err)
 				}
 			case "cleanup":
 				if err := runCleanup(cmd, dryRun, false, asJSON); err != nil {
-					return err
+					return failBridge(cmd, job, asJSON && bridgeJSON, err)
 				}
 			default:
-				return fmt.Errorf("unknown job %q (want backup or cleanup)", args[0])
+				return fmt.Errorf("unknown job %q (want backup or cleanup)", job)
 			}
-			if asJSON {
-				return emitBridgeStatus(cmd, args[0])
+			if asJSON && bridgeJSON {
+				if err := emitBridgeStatus(cmd, job); err != nil {
+					return failBridge(cmd, job, true, err)
+				}
 			}
 			return nil
 		},
 	}
 	f := run.Flags()
 	f.BoolVar(&dryRun, "dry-run", false, "do not write archives or delete anything")
-	f.BoolVar(&asJSON, "json", false, "after the run, print the normalized bridge status JSON (schema v1)")
+	f.BoolVar(&asJSON, "json", false, "after the run, print the job result as JSON")
+	f.BoolVar(&bridgeJSON, "bridge", false, "with --json: emit the normalized bridge status (schema v1) instead of the raw report")
 	f.StringVar(&task, "task", "", "backup only: run only the named task")
 	return run
 }
@@ -63,6 +69,20 @@ func emitBridgeStatus(cmd *cobra.Command, job string) error {
 		return err
 	}
 	return encodeJSON(cmd.OutOrStdout(), bs)
+}
+
+// failBridge keeps the machine contract whole: when a --json run fails so
+// hard that no report was written (lock contention, invalid config, ...),
+// or when the just-written report cannot be re-read, the APK still receives
+// one parseable BridgeStatus document with status="failed" and an error
+// message on stdout — plus the original non-zero exit code. Without this,
+// callers would have to special-case "exit != 0 && empty stdout" and risk
+// falling back to a stale report instead.
+func failBridge(cmd *cobra.Command, job string, asJSON bool, runErr error) error {
+	if asJSON {
+		_ = encodeJSON(cmd.OutOrStdout(), bridge.NewFailedStatus(job, Version, runErr.Error()))
+	}
+	return runErr
 }
 
 // newScheduleCmd implements `hlops schedule generate cron [--job backup|cleanup]`.
