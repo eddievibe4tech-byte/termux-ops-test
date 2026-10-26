@@ -8,10 +8,13 @@
 package termux
 
 import (
+	"context"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 )
 
 // OEM family identifiers returned by DetectOEM().
@@ -25,18 +28,23 @@ const (
 	OEMOther    = "other"          // recognised as custom ROM, family unknown
 )
 
-// The properties we rely on: ro.build.version.opporom / riscos.version cover
-// ColorOS and realme UI; ro.miui.ui.version.name covers MIUI and HyperOS;
+// The properties we rely on: since Android 11 OPPO / OnePlus / realme share
+// the Oplus codebase, so ro.build.version.oplusrom is the primary ColorOS /
+// OxygenOS / realme UI marker (ro.build.version.opporom and
+// ro.build.version.realmeui remain as legacy props); MIUI uses
+// ro.miui.ui.version.name while HyperOS introduced ro.mi.os.version.name;
 // vivo variants expose ro.vivo.os.name / ro.vivo.os.version; Huawei uses
-// ro.build.version.emui / ro.build.hw_emui_api_level. classifyOEM below reads
-// them from a full `getprop` dump.
+// ro.build.version.emui / ro.build.hw_emui_api_level and Honor after its
+// spin-off uses ro.build.version.magic. classifyOEM below reads them from a
+// full `getprop` dump.
 
 // OEMInfo is the classification result for one device.
 type OEMInfo struct {
 	// Family is one of the OEM* constants above (OEMUnknown when no
 	// aggressive task killer was detected).
 	Family string
-	// Manufacturer / Brand echo the raw props for display purposes.
+	// Manufacturer / Brand echo the raw getprop values (original casing
+	// preserved for display); classification compares case-insensitively.
 	Manufacturer string
 	Brand        string
 	// DisplayID is ro.build.display.id when available.
@@ -103,11 +111,9 @@ func DetectOEM() *OEMInfo {
 	return oemCached
 }
 
-// ResetOEMCache clears the memoised OEM classification (used by tests).
-func ResetOEMCache() {
-	oemCached = nil
-	oemOnce = sync.Once{}
-}
+// Note: there is deliberately no ResetOEMCache() helper. Mutating the global
+// oemOnce / oemCached would be a data race under parallel tests; unit tests
+// exercise the pure classifyOEM function with mock property maps instead.
 
 // readProps collects the interesting system properties. On Android/Termux it
 // shells out to getprop once and parses the whole dump; elsewhere it returns
@@ -116,7 +122,17 @@ func readProps() map[string]string {
 	if runtime.GOOS != "android" && !Detect().IsTermux {
 		return map[string]string{}
 	}
-	out, err := exec.Command("getprop").Output()
+	// Prefer the absolute path: daemons (crond, scheduled backups) or
+	// minimal shells may run without /system/bin on PATH.
+	cmdPath := "getprop"
+	if _, err := os.Stat("/system/bin/getprop"); err == nil {
+		cmdPath = "/system/bin/getprop"
+	}
+	// Bound the call: a hung binder/SELinux-blocked getprop (seen on
+	// Android 14+) must not freeze the process indefinitely.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, cmdPath).Output()
 	if err != nil {
 		return map[string]string{}
 	}
@@ -152,8 +168,8 @@ func ParseGetprop(dump string) map[string]string {
 // unit-tested with captured getprop dumps from real devices.
 func classifyOEM(props map[string]string) *OEMInfo {
 	info := &OEMInfo{
-		Manufacturer: strings.ToLower(props["ro.product.manufacturer"]),
-		Brand:        strings.ToLower(props["ro.product.brand"]),
+		Manufacturer: props["ro.product.manufacturer"], // raw casing, for display
+		Brand:        props["ro.product.brand"],        // raw casing, for display
 		DisplayID:    props["ro.build.display.id"],
 	}
 
@@ -167,22 +183,44 @@ func classifyOEM(props map[string]string) *OEMInfo {
 		}
 		return false
 	}
+	// Sub-brands (POCO, iQOO, realme, Redmi, Honor) frequently report the
+	// parent company in one of manufacturer/brand, so match either field.
+	isBrandOrMaker := func(targets ...string) bool {
+		m := strings.ToLower(info.Manufacturer)
+		b := strings.ToLower(info.Brand)
+		for _, t := range targets {
+			lt := strings.ToLower(t)
+			if m == lt || b == lt {
+				return true
+			}
+		}
+		return false
+	}
 
 	switch {
-	case has("ro.build.version.opporom"), has("ro.build.version.riscoversion"),
-		info.Manufacturer == "oppo", info.Manufacturer == "oneplus", info.Manufacturer == "realme":
+	// ColorOS / OxygenOS / realme UI. ro.build.version.oplusrom is the key
+	// Oplus-era property on ColorOS 11-15, Realme UI 2+ and OxygenOS 12+.
+	case has("ro.build.version.oplusrom"), has("ro.build.version.opporom"),
+		has("ro.build.version.realmeui"),
+		isBrandOrMaker("oppo", "oneplus", "realme"):
 		info.Family = OEMColorOS
-	case has("ro.miui.ui.version.name"), containsFold(info.DisplayID, "miui", "hyperos"),
-		info.Manufacturer == "xiaomi", info.Manufacturer == "redmi", info.Manufacturer == "poco":
+	// HyperOS / MIUI. ro.mi.os.version.name is the dedicated HyperOS prop;
+	// ro.miui.ui.version.name covers legacy MIUI devices.
+	case has("ro.mi.os.version.name"), has("ro.miui.ui.version.name"),
+		containsFold(info.DisplayID, "miui", "hyperos"),
+		isBrandOrMaker("xiaomi", "redmi", "poco"):
 		info.Family = OEMMIUI
 	case has("ro.vivo.os.name"), has("ro.vivo.os.version"),
-		info.Manufacturer == "vivo", info.Manufacturer == "iqoo":
+		isBrandOrMaker("vivo", "iqoo"):
 		info.Family = OEMOriginOS
+	// EMUI / HarmonyOS / MagicOS. hw_emui_api_level values are often plain
+	// integers ("9", "11"), so presence alone is enough; ro.build.version.magic
+	// covers Honor after its spin-off from Huawei.
 	case has("ro.build.version.emui"), has("ro.huawei.build.display.id"),
-		has("ro.build.hw_emui_api_level"), // EMUI API levels are often plain integers ("9", "11")
-		info.Manufacturer == "huawei", info.Manufacturer == "honor":
+		has("ro.build.hw_emui_api_level"), has("ro.build.version.magic"),
+		isBrandOrMaker("huawei", "honor"):
 		info.Family = OEMEMUI
-	case info.Manufacturer == "meizu", containsFold(info.DisplayID, "flyme"):
+	case isBrandOrMaker("meizu"), containsFold(info.DisplayID, "flyme"):
 		info.Family = OEMFlyme
 	default:
 		// Known-manufacturer list of other aggressive killers without a
@@ -190,7 +228,7 @@ func classifyOEM(props map[string]string) *OEMInfo {
 		// intentionally NOT flagged here).
 		aggressiveOthers := []string{"asus", "lenovo", "zte", "gionee", "letv", "coolpad"}
 		for _, m := range aggressiveOthers {
-			if info.Manufacturer == m {
+			if isBrandOrMaker(m) {
 				info.Family = OEMOther
 				break
 			}
