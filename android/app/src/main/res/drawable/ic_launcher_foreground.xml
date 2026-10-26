@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- "hlops" prompt: a green chevron + underscore, Termux-style -->
+    <path
+        android:fillColor="#3DDC84"
+        android:pathData="M30,38l14,16l-14,16l-5,0l14,-16l-14,-16z" />
+    <path
+        android:fillColor="#3DDC84"
+        android:pathData="M50,72h28v5h-28z" />
+</vector>

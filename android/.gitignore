@@ -1,0 +1,15 @@
+# Gradle / Android build artifacts (issue #39)
+.gradle/
+build/
+*/build/
+local.properties
+*.keystore
+*.jks
+!debug.keystore
+.idea/
+*.iml
+captures/
+.cxx/
+
+# JVM crash logs
+hs_err_pid*.log
