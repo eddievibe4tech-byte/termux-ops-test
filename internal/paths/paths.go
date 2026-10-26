@@ -2,6 +2,7 @@
 package paths
 
 import (
+	"log/slog"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -35,6 +36,12 @@ func Home() string {
 		}
 		h, err := os.UserHomeDir()
 		if err != nil {
+			// Extremely minimal environments (no $HOME, no user database)
+			// can fail here. An empty home would silently turn every derived
+			// path into a relative one and let state files land in the CWD,
+			// so pin a writable absolute fallback instead.
+			slog.Warn("paths: failed to detect home directory, falling back to /tmp", "error", err)
+			homeOnce.val = "/tmp"
 			return
 		}
 		homeOnce.val = h
@@ -45,6 +52,11 @@ func Home() string {
 // SetHomeForTest overrides the memoised home value. It exists solely so unit
 // tests can exercise home-dependent logic with a temporary directory; calling
 // it from production code is a bug.
+//
+// WARNING: This modifies global state (it resets the memoisation Once).
+// Tests using this function MUST NOT call t.Parallel(): parallel tests
+// racing on homeOnce would trigger a data race and cross-contaminate each
+// other's expected paths.
 func SetHomeForTest(h string) {
 	homeOnce.once = sync.Once{}
 	homeOnce.once.Do(func() { homeOnce.val = h })
