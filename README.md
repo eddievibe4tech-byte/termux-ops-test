@@ -5,6 +5,8 @@
 
 本專案使用 **Go** 實作，目標是在 Termux 上以單一執行檔完成日常維運。
 
+> **注意**：`hlops` 是純命令列工具（CLI），不是 Android APK，需要先安裝 [Termux](https://termux.dev/)（建議 F-Droid/GitHub 版本）。未來 M10 階段規劃提供 GUI 輔助 App（Companion APK）降低使用門檻，詳見議題 #37。
+
 ---
 
 ## 設計目標

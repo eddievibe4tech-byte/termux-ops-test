@@ -1,5 +1,8 @@
 # hlops Termux 快速上手
 
+> **定位說明**：`hlops` 為純命令列工具（CLI），需在 Termux 環境下執行，**並非 Android APK**。
+> 未來版本（M10）規劃提供 GUI 輔助 App（Companion APK），用於一鍵權限設定、Termux 檢查與備份觸發，詳見議題 #37。
+
 ## 安裝
 
 ### 方式一：安裝腳本（從 GitHub Release）
