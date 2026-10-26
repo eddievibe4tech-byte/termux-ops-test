@@ -21,7 +21,7 @@ missing=0
 fields=$(awk '
     /^type (BridgeStatus|TaskState) struct/ { inside = 1; next }
     inside && /^}/ { inside = 0 }
-    inside { while (match($0, /json:"[a-z_0-9]+/)) { print substr($0, RSTART+6, RLENGTH-6); $0 = substr($0, RSTART+RLENGTH) } }
+    inside { while (match($0, /json:"[a-zA-Z0-9_-]+/)) { print substr($0, RSTART+6, RLENGTH-6); $0 = substr($0, RSTART+RLENGTH) } }
 ' "$GO_SRC" | sort -u)
 
 while IFS= read -r field; do
@@ -36,4 +36,5 @@ if [ "$missing" -ne 0 ]; then
     echo "Bridge contract drift detected — update BridgeStatus.kt and docs/companion-app-bridge.md together." >&2
     exit 1
 fi
-echo "OK: all $(grep -c . <<< "$fields") bridge JSON fields are covered by the Kotlin parser."
+count=$(echo "$fields" | grep -c . || true)
+echo "OK: all $count bridge JSON fields are covered by the Kotlin parser."

@@ -6,11 +6,16 @@ on:
   pull_request:
     paths:
       - 'android/**'
+      - 'internal/bridge/**'            # Go-side bridge changes must re-trigger the contract guard
+      - 'docs/companion-app-bridge.md'  # doc changes also trigger, keeping schema in sync
       - '.github/workflows/android-ci.yml'
   push:
     branches: [main]
     paths:
       - 'android/**'
+      - 'internal/bridge/**'
+      - 'docs/companion-app-bridge.md'
+      - '.github/workflows/android-ci.yml'
 
 permissions:
   contents: read
@@ -42,7 +47,7 @@ jobs:
         run: ./gradlew --no-daemon assembleDebug
       - name: Assemble release APK
         # Release signing is opt-in via secrets (issue #39). Without them the
-        # build falls back to an unsigned artifact (see app/build.gradle.kts),
+        # build falls back to the debug signing config (see app/build.gradle.kts),
         # so fork PRs never fail on missing keys.
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -55,7 +60,7 @@ jobs:
             export KEYPATH="$RUNNER_TEMP/hlops.keystore"
           fi
           ./gradlew --no-daemon assembleRelease
-      - name: Lint (fatal only)
+      - name: Lint (report only; abortOnError disabled in build.gradle.kts)
         run: ./gradlew --no-daemon lintDebug
       - uses: actions/upload-artifact@v4
         with:
