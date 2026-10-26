@@ -16,9 +16,12 @@ jobs:
       - name: Build binaries
         run: |
           set -e
+          VERSION="${GITHUB_REF_NAME}"   # tag name, e.g. v0.1.0
           for pair in linux/amd64 linux/arm64; do
             os=${pair%/*}; arch=${pair#*/}
-            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -ldflags "-s -w" -o dist/hlops-$os-$arch ./cmd/hlops
+            CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build \
+              -ldflags "-s -w -X hlops/internal/cli.Version=${VERSION}" \
+              -o dist/hlops-$os-$arch ./cmd/hlops
           done
       - name: Checksums
         run: |
