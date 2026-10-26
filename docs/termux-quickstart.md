@@ -54,10 +54,22 @@ hlops run cleanup --dry-run
    crontab ~/.config/cron/crontabs/$USER   # Termux cronie 位置
    ```
 
-## 電池優化白名單
-Android 可能終止背景工作。請將 Termux 加入電池最佳化豁免：
-- 系統設定 → App → Termux → 電池 →  unrestricted / 不限制
-- 或在 Termux 中執行 `termux-wake-lock`（hlops run 會自動處理）。
+## 電池優化白名單與背景防殺（特別是 OPPO / 小米 / vivo）
+Android 系統（特別是 **ColorOS、HyperOS/MIUI、OriginOS** 等客製化 ROM）有極度激進的背景清理機制，會直接忽略 WakeLock 強制終止 Termux。若要讓排程備份穩定運行，**必須手動完成以下設定**：
+
+1. **電池最佳化豁免**：
+   - 進入「設定 → 應用程式 → Termux → 耗電量管理」，改為 **「允許完全背景行為」** 或 **「不最佳化」**。
+   - 系統設定 → App → Termux → 電池 → unrestricted / 不限制
+2. **多工介面鎖定**：
+   - 開啟多工切換畫面（Recents），找到 Termux 卡片並點擊選單加上 **「鎖定（小鎖頭）」**，防止一鍵清理時被終止。
+3. **允許自啟動**：
+   - 進入「設定 → 應用程式 → 自啟動管理」，允許 Termux 自啟動。
+4. **關閉夜間睡眠最佳化**（排程設定於半夜時必做）：
+   - 進入「設定 → 電池 → 更多/進階設定」，關閉 **「睡眠待機最佳化」**，避免系統在凌晨切斷 CPU 與網路資源。
+
+另外可在 Termux 中執行 `termux-wake-lock`（hlops run 會自動處理）。
+
+> 更多不同品牌手機的設定指引，請參考 [Don't kill my app!](https://dontkillmyapp.com/)。
 
 ## 日誌
 預設寫入 `$HOME/.local/state/hlops/logs`。

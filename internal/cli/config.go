@@ -80,6 +80,17 @@ func newDoctorCmd() *cobra.Command {
 				{"name": "config_dir_writable", "ok": paths.Writable(paths.ConfigDir()), "detail": paths.ConfigDir()},
 				{"name": "state_dir_writable", "ok": paths.Writable(paths.StateDir()), "detail": paths.StateDir()},
 			}
+			// On Termux, add an advisory about aggressive OEM battery managers
+			// (ColorOS / HyperOS-MIUI / OriginOS) that may freeze or kill
+			// background jobs despite wake locks. This check is informational
+			// and never affects the overall health result.
+			if info.IsTermux {
+				checks = append(checks, map[string]any{
+					"name":   "oem_battery_advisory",
+					"ok":     true,
+					"detail": "On aggressive OEM ROMs (ColorOS / HyperOS-MIUI / OriginOS), manually allow unrestricted background behaviour, lock Termux in Recents, enable auto-start, and disable sleep standby optimisation. See https://dontkillmyapp.com/",
+				})
+			}
 			allOK := true
 			for _, c := range checks {
 				if ok, _ := c["ok"].(bool); !ok {
