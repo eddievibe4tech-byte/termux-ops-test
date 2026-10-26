@@ -27,8 +27,25 @@ func newBridgeCmd() *cobra.Command {
 human output: normalized run status from the newest JSON report, and the
 latest log tail. Output is stable JSON guarded by a "schema" field.`,
 	}
-	bridgeCmd.AddCommand(newBridgeStatusCmd(), newBridgeLogsCmd())
+	bridgeCmd.AddCommand(newBridgeStatusCmd(), newBridgeLogsCmd(), newBridgePathsCmd())
 	return bridgeCmd
+}
+
+// newBridgePathsCmd exposes the resolved on-disk layout as stable JSON so the
+// Companion APK (issue #37) can render "where do reports/logs live" hints and
+// pre-fill SAF pickers without hard-coding Termux vs Linux home paths.
+func newBridgePathsCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "paths",
+		Short: fmt.Sprintf("Print hlops file locations as bridge JSON (schema v%d)", bridge.SchemaVersion),
+		Long: `Machine-readable map of every hlops state directory (reports, logs,
+config). Pure read-only: creates nothing. The Companion APK uses display_*
+fields for UI strings; absolute fields are for debugging only.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return encodeJSON(cmd.OutOrStdout(), bridge.NewPathsDocument(Version))
+		},
+	}
 }
 
 func newBridgeStatusCmd() *cobra.Command {

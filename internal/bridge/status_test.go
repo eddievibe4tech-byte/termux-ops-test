@@ -1,9 +1,11 @@
 package bridge
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -15,6 +17,9 @@ import (
 // one package binary and would otherwise observe each other's seeded files.
 func writeReport(t *testing.T, name, body string) string {
 	t.Helper()
+	// paths.Home is memoised per process; point it at this test's isolated
+	// HOME before any report-directory helper runs.
+	paths.SetHomeForTest(os.Getenv("HOME"))
 	dir := paths.ReportDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -92,6 +97,7 @@ func TestParseCleanupStatusAndUnknownFields(t *testing.T) {
 
 func TestLatestReportPrefersNewest(t *testing.T) {
 	t.Setenv("HOME", t.TempDir()) // isolate reports dir from sibling tests
+	paths.SetHomeForTest(os.Getenv("HOME"))
 	old := writeReport(t, "backup-20200101-000000.json", sampleBackup)
 	newer := writeReport(t, "backup-20240101-000000.json", sampleBackup)
 	info, err := LatestReport(JobBackup)
@@ -109,6 +115,7 @@ func TestLatestReportPrefersNewest(t *testing.T) {
 func TestNoReportIsNotFatal(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
+	paths.SetHomeForTest(tmp)
 	info, err := LatestReport("")
 	if !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("expected ErrNotExist-wrapping error, got %v", err)
@@ -156,6 +163,7 @@ func TestEmptyReportAggregatesToOK(t *testing.T) {
 // tie-break and failed deterministically on nanosecond-granularity ext4 in CI.
 func TestListReportsSortsByStampWithDashedNames(t *testing.T) {
 	t.Setenv("HOME", t.TempDir()) // isolate reports dir from sibling tests
+	paths.SetHomeForTest(os.Getenv("HOME"))
 	newer := writeReport(t, "backup-website-blog-20240102-000000.json", sampleBackup)
 	writeReport(t, "backup-website-blog-20240101-000000.json", sampleBackup)
 	info, err := LatestReport(JobBackup)
@@ -171,6 +179,7 @@ func TestListReportsSortsByStampWithDashedNames(t *testing.T) {
 func TestListReportsFallsBackToModTime(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp) // isolate: earlier tests seeded the reports dir
+	paths.SetHomeForTest(tmp)
 	a := writeReport(t, "backup-legacy-a.json", sampleBackup)
 	b := writeReport(t, "backup-legacy-b.json", sampleBackup)
 	now := time.Now()
@@ -200,5 +209,37 @@ func TestNewFailedStatusShape(t *testing.T) {
 	}
 	if fs.Job != JobBackup {
 		t.Fatalf("job = %q", fs.Job)
+	}
+}
+
+func TestNewPathsDocument(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	paths.SetHomeForTest(home)
+	doc := NewPathsDocument("9.9.9-test")
+	if doc.Schema != SchemaVersion {
+		t.Fatalf("schema = %d want %d", doc.Schema, SchemaVersion)
+	}
+	if doc.HlopsVersion != "9.9.9-test" {
+		t.Fatalf("version = %q", doc.HlopsVersion)
+	}
+	if want := filepath.Join(home, ".local", "state", "hlops", "reports"); doc.Paths.ReportDir != want {
+		t.Fatalf("report_dir = %q want %q", doc.Paths.ReportDir, want)
+	}
+	if want := filepath.Join(home, ".local", "state", "hlops", "logs"); doc.Paths.LogDir != want {
+		t.Fatalf("log_dir = %q want %q", doc.Paths.LogDir, want)
+	}
+	// bridge paths must never create anything (pure read-only contract).
+	if _, err := os.Stat(filepath.Join(home, ".local")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("NewPathsDocument must not create directories, stat err = %v", err)
+	}
+	b, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{`"schema":1`, `"display_report_dir"`, `"display_log_dir"`, `"config_file"`} {
+		if !strings.Contains(string(b), key) {
+			t.Fatalf("paths JSON missing %s: %s", key, b)
+		}
 	}
 }
