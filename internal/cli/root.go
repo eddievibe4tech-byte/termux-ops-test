@@ -5,6 +5,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"runtime"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/eddievibe4tech-byte/termux-ops/internal/config"
 	"github.com/eddievibe4tech-byte/termux-ops/internal/logging"
 	"github.com/eddievibe4tech-byte/termux-ops/internal/paths"
+	"github.com/eddievibe4tech-byte/termux-ops/internal/termination"
 	"github.com/eddievibe4tech-byte/termux-ops/internal/termux"
 )
 
@@ -95,18 +97,27 @@ func closeAll() {
 // Execute runs the CLI and returns the process exit code.
 func Execute() int {
 	defer closeAll()
+	// Issue #43: on aggressive OEM ROMs the system task killer sends
+	// SIGTERM/SIGKILL to Termux despite wake locks. WatchSignals turns a
+	// catchable termination into a logged, diagnosable exit (128+signum)
+	// instead of a silent death that looks like "the backup crashed".
+	termination.WatchSignals(closeAll)
 	cmd := NewRootCmd()
 	if err := cmd.Execute(); err != nil {
 		var ee *exitErr
+		code := ExitError
 		if errors.As(err, &ee) {
-			return ee.code
-		}
-		if errors.Is(err, config.ErrConfigSyntax) {
-			fmt.Fprintln(os.Stderr, "error:", err)
-			return ExitSyntax
+			code = ee.code
+		} else if errors.Is(err, config.ErrConfigSyntax) {
+			code = ExitSyntax
 		}
 		fmt.Fprintln(os.Stderr, "error:", err)
-		return ExitError
+		// One-line diagnosis so users (and log scrapers) can tell a real
+		// crash apart from a forced system termination or a benign skip.
+		oemAgg := termux.Detect().IsTermux && termux.DetectOEM().Aggressive
+		slog.Warn("run terminated", "exit_code", code,
+			"diagnosis", termination.ClassifyExit(code, termination.Interrupted, oemAgg))
+		return code
 	}
 	return ExitOK
 }
