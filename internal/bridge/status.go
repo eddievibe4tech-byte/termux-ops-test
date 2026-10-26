@@ -335,3 +335,58 @@ func NoReport(version string) *BridgeStatus {
 		HlopsVersion: version,
 	}
 }
+
+// PathsInfo is the machine-readable map of every file location the Companion
+// APK may need to surface to the user (issue #37 acceptance criterion: "查看
+// 日誌" must know where logs live). All paths are absolute; display-friendly
+// forms ("~/..." or the Termux prefix form) are provided separately so UIs
+// never hard-code home layouts. Added in schema v1 as an additive, forward-
+// compatible top-level object — older APKs ignore unknown fields per the
+// compatibility rules in docs/companion-app-bridge.md.
+type PathsInfo struct {
+	Home       string `json:"home"`
+	StateDir   string `json:"state_dir"`
+	ReportDir  string `json:"report_dir"`
+	LogDir     string `json:"log_dir"`
+	ConfigFile string `json:"config_file"`
+	// Display variants (e.g. "~/.local/state/hlops/logs" on Linux, absolute
+	// Termux prefix path inside Termux) for direct rendering in UI strings.
+	DisplayReportDir  string `json:"display_report_dir"`
+	DisplayLogDir     string `json:"display_log_dir"`
+	DisplayConfigFile string `json:"display_config_file"`
+}
+
+// NewPathsInfo snapshots the current on-disk layout via internal/paths. It is
+// pure (creates nothing) so `hlops bridge paths` stays side-effect free like
+// the rest of the bridge surface.
+func NewPathsInfo() PathsInfo {
+	return PathsInfo{
+		Home:              paths.Home(),
+		StateDir:          paths.StateDir(),
+		ReportDir:         paths.ReportDir(),
+		LogDir:            paths.LogDir(),
+		ConfigFile:        paths.ConfigFile(),
+		DisplayReportDir:  paths.DisplayPath(paths.ReportDir()),
+		DisplayLogDir:     paths.DisplayPath(paths.LogDir()),
+		DisplayConfigFile: paths.DisplayPath(paths.ConfigFile()),
+	}
+}
+
+// PathsDocument wraps PathsInfo with the shared schema/version envelope so
+// every bridge command emits one consistent JSON shape.
+type PathsDocument struct {
+	Schema       int       `json:"schema"`
+	GeneratedAt  string    `json:"generated_at"`
+	HlopsVersion string    `json:"hlops_version,omitempty"`
+	Paths        PathsInfo `json:"paths"`
+}
+
+// NewPathsDocument builds the `hlops bridge paths` output document.
+func NewPathsDocument(version string) PathsDocument {
+	return PathsDocument{
+		Schema:       SchemaVersion,
+		GeneratedAt:  time.Now().UTC().Format(time.RFC3339),
+		HlopsVersion: version,
+		Paths:        NewPathsInfo(),
+	}
+}

@@ -353,6 +353,23 @@ hlops bridge logs --lines 20     # 主日誌最後 20 行
 
 ---
 
+## Code Review Skill（AI 輔助審查規範）
+
+本專案在 [.github/skills/go_android_termux_reviewer/SKILL.md](.github/skills/go_android_termux_reviewer/SKILL.md)
+維護一份針對 **Android / Termux / OEM 特製系統** 環境的 Go 程式碼審查規範，
+供 Qwen 或相容 Agentic 架構的模型在 Review 或撰寫本專案程式碼時自動套用。
+
+涵蓋四個檢查維度：
+
+1. **Go 語言隱形地雷**：NBSP（`\u00a0`）非法空白、變數遮蔽（Variable Shadowing）、`sync.Once` 快取重置與 `t.Parallel()` 的 Data Race 風險。
+2. **標準庫效能陷阱**：`bufio.Scanner` 64KB 單行硬上限（需 `scanner.Buffer` 放寬至 1MB）、tail 滑動視窗 `copy()` 的 $O(N \times M)$ 搬移（強制改用環形緩衝區 Ring Buffer）。
+3. **OEM 屬性探測精準度**：歐加系（`ro.build.version.oplusrom` / `opporom` / `realmeui`）、HyperOS（`ro.mi.os.version.name`）、MagicOS（`ro.build.version.magic`）、Manufacturer/Brand 雙重比對（`strings.EqualFold`）、`getprop` 須走 `/system/bin` 絕對路徑並加 `exec.CommandContext` 逾時防護。
+4. **OPPO ColorOS 14 / Android 14 實機防護**：Athena 背景 I/O 調度殺手（SIGSTOP/SIGKILL 防範）、Scoped Storage 跨 App 沙盒邊界——Companion APK 只能透過 Termux `RUN_COMMAND` Intent 接收 CLI 標準輸出 JSON，**不可直接以檔案路徑開啟 Termux 私有目錄**。
+
+PR 審查時可直接引用此 Skill 作為 checklist；修改 bridge/paths/logs 相關程式碼前請先逐項核對。
+
+---
+
 ## `hlops schedule generate`
 
 Termux 上建議使用 `crond` 排程。
